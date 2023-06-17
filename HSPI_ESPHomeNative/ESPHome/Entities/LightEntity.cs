@@ -4,6 +4,7 @@ using HomeSeer.PluginSdk.Devices;
 using HomeSeer.PluginSdk.Devices.Controls;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace HSPI_ESPHomeNative.ESPHome.Entities
 {
@@ -16,10 +17,9 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
         public override Dictionary<int, Action<ControlEvent>> ProcessFeatures(HsDevice device, IHsController homeSeer)
         {
 
-            var controlsFactory = FeatureFactory.CreateGenericBinaryControl(Program._plugin.Id, "Test Device", "On", "Off", 100, 0)
+            var controlsFactory = FeatureFactory.CreateGenericBinaryControl(Program._plugin.Id, $"{EntityData.Name} State", "On", "Off", 100, 0)
             .WithDisplayType(EFeatureDisplayType.Important)
                 .AddSlider(new ValueRange(1, 99), controlUse: EControlUse.Dim)
-                .AddColorPicker(255, controlUse: EControlUse.ColorControl)
                 .AddGraphicForValue("images/HomeSeer/status/unknown.png", -1.0, "Offline")
                 .AddGraphicForRange("images/HomeSeer/status/dim-00.gif", 01.00f, 10f)
                 .AddGraphicForRange("images/HomeSeer/status/dim-10.gif", 10.01f, 20f)
@@ -49,10 +49,10 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
             });
         
 
-           /* if (EntityData.SupportedColorModes.Contains(ColorMode.Rgb))
+            if (EntityData.SupportedColorModes.Contains(ColorMode.Rgb))
             {
                 var colorFeature = Device.GetOrCreateFeature("color", FeatureFactory.CreateFeature(Program._plugin.Id)
-                    .WithName("Color").OnDevice(device.Ref)
+                    .WithName($"{EntityData.Name} Color").OnDevice(device.Ref)
                     .AddColorPicker(0, controlUse: EControlUse.ColorControl)
                     .AddGraphicForValue("images/HomeSeer/status/custom-color.png", 0));
 
@@ -68,7 +68,7 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
 
                     SetColor(red / 255.0f, green / 255.0f, blue / 255.0f);
                 });
-            }*/
+            }
 
             if(EntityData.Effects.Count > 0)
             {
@@ -77,7 +77,7 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
                     effects.Add(effect, effects.Count);
 
                 var effectFeature = Device.GetOrCreateFeature("effect", FeatureFactory.CreateFeature(Program._plugin.Id)
-                    .WithName("Effect").
+                    .WithName($"{EntityData.Name} Effect").
                     AddTextDropDown(effects, controlUse: EControlUse.OnAlternate));
                 FeatureIds.Add("effect", effectFeature.Ref);
 

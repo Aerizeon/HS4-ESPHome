@@ -55,6 +55,8 @@ namespace HSPI_ESPHomeNative.ESPHome
     {
         public string Name { get; private set; }
 
+        public string FriendlyName { get; private set; }
+
         public List<IEntity> Entities{ get; private set; } = new List<IEntity>();
 
         public string Id { get; private set; }
@@ -112,11 +114,12 @@ namespace HSPI_ESPHomeNative.ESPHome
             SendMessage(new DeviceInfoRequest());
             SendMessage(new ListEntitiesRequest());
             await Task.WhenAll(_tcsDeviceInfo.Task, _tcsListEntitiesDone.Task);
+            DeviceInfoResponse result = _tcsDeviceInfo.Task.Result;
+            Name = string.IsNullOrEmpty(result.FriendlyName) ? result.Name : result.FriendlyName;
         }
 
         public void PrepareFeatures(HsDevice device, IHsController homeSeer)
         {
-            Program._plugin.WriteLog(ELogType.Debug, $"PrepareFeatures");
             _device = device;
             _homeSeer = homeSeer;
             foreach (var entity in Entities)

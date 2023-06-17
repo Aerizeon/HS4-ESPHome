@@ -46,7 +46,7 @@ namespace HSPI_ESPHomeNative
                 hsDevice = HomeSeerSystem.GetDeviceWithFeaturesByRef(hsDevice.Ref);
             else
             {
-                var df = DeviceFactory.CreateDevice(Program._plugin.Id).WithName("Test Device").WithAddress($"esp{device.Id}");
+                var df = DeviceFactory.CreateDevice(Program._plugin.Id).WithName(device.Name).WithAddress($"esp{device.Id}");
                 int deviceId = HomeSeerSystem.CreateDevice(df.PrepareForHs());
                 hsDevice = HomeSeerSystem.GetDeviceWithFeaturesByRef(deviceId);
             }
