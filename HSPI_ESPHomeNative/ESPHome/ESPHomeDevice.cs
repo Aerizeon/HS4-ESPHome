@@ -10,74 +10,54 @@ using HomeSeer.PluginSdk.Devices;
 using HSPI_ESPHomeNative.ESPHome.Entities;
 using HomeSeer.PluginSdk;
 using HomeSeer.PluginSdk.Devices.Controls;
-using Esphome;
 using System.Net;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Security.Cryptography;
 using HomeSeer.PluginSdk.Logging;
+using System.Timers;
+using ProtoBuf;
+using Google.Protobuf.Reflection;
+using ProtoBuf.Reflection;
+using Newtonsoft.Json.Linq;
+using ProtoBuf.Meta;
+using System.CodeDom;
+using System.Reflection;
+using System.IO;
+using static HSPI_ESPHomeNative.ESPHome.ProtocolTypeMap;
+using System.Runtime.InteropServices.ComTypes;
 
 namespace HSPI_ESPHomeNative.ESPHome
 {
-    public enum MessageType : uint
-    {
-        HelloResponse = 2,
-        ConnectResponse = 4,
-        DisconnectResponse = 6,
-        PingRequest = 7,
-        PingResponse = 8,
-        DeviceInfoResponse = 10,
-        ListEntitiesDoneResponse = 19,
-
-        ListEntitiesBinarySensorResponse = 12,
-        BinarySensorStateResponse = 21,
-
-        ListEntitiesCoverResponse = 13,
-        CoverStateResponse = 22,
-
-        ListEntitiesFanResponse = 14,
-        FanStateResponse = 23,
-        FanCommandRequest = 31,
-
-        ListEntitiesLightResponse = 15,
-        LightStateResponse = 24,
-        LightCommandRequest = 32,
-
-        ListEntitiesSensorResponse = 16,
-        SensorStateResponse = 25,
-
-        ListEntitiesSwitchResponse = 17,
-        SwitchStateResponse = 26,
-        SwitchCommandRequest = 33,
-
-    }
     internal class ESPHomeDevice
     {
         public string Name { get; private set; }
-
         public string FriendlyName { get; private set; }
-
         public List<IEntity> Entities{ get; private set; } = new List<IEntity>();
-
         public string Id { get; private set; }
-
         public IPAddress Address { get; private set; }
         public int Port { get; private set; }
 
-        Dictionary<int, Action<ControlEvent>> eventCallbacks = new Dictionary<int, Action<ControlEvent>>();
+        public delegate void DisconnectedHandler(ESPHomeDevice sender);
+        public event DisconnectedHandler OnDisconnected;
 
-        ConcurrentQueue<IMessage> outgoingMessages = new ConcurrentQueue<IMessage>();
-        SemaphoreSlim newMessage = new SemaphoreSlim(0);
+        Dictionary<int, Action<ControlEvent>> eventCallbacks = new Dictionary<int, Action<ControlEvent>>();
 
         public delegate void FeatureUpdateHandler(int refId, double value, string valueString);
         public event FeatureUpdateHandler OnFeatureUpdate;
+       
+
+      
+
+        private HsDevice _device;
+        private IHsController _homeSeer;
+        private bool _connected = false;
+        private DateTime _lastMessage = DateTime.UtcNow;
         private TcpClient _client;
         private TaskCompletionSource<ConnectResponse> _tcsConnected = new TaskCompletionSource<ConnectResponse>();
         private TaskCompletionSource<DeviceInfoResponse> _tcsDeviceInfo = new TaskCompletionSource<DeviceInfoResponse>();
         private TaskCompletionSource<object> _tcsListEntitiesDone = new TaskCompletionSource<object>();
-
-        private HsDevice _device;
-        private IHsController _homeSeer;
+        private System.Timers.Timer pingTimeout = new System.Timers.Timer();
 
         public ESPHomeDevice(string name, string address, int port, string macAddress)
         {
@@ -86,12 +66,22 @@ namespace HSPI_ESPHomeNative.ESPHome
             Address = IPAddress.Parse(address);
             Port = port;
             _client = new TcpClient();
+            pingTimeout.Interval = 10000;
+            pingTimeout.AutoReset = true;
+            pingTimeout.Elapsed += PingTimeout_Elapsed;
+        }
+
+        private void PingTimeout_Elapsed(object sender, ElapsedEventArgs e)
+        {
+            if (DateTime.UtcNow - _lastMessage > TimeSpan.FromSeconds(90))
+                Disconnect();
         }
 
         public async Task<ConnectResponse> Connect(string password = "")
         {
             await _client.ConnectAsync(Address, Port);
-            RunBackgroundWorkers();
+            _connected = true;
+            _ = Task.Run(Reader);
             // We can skip the hello portion of the exchange,
             // since we're not using the noise encryption yet.
 
@@ -100,13 +90,8 @@ namespace HSPI_ESPHomeNative.ESPHome
                 Password = password
             };
             SendMessage(request);
-           
+            pingTimeout.Start();
             return await _tcsConnected.Task;
-        }
-
-        async void RunBackgroundWorkers()
-        {
-            await Task.WhenAll(Task.Run(Reader), Task.Run(Writer));
         }
 
         public async Task QueryDeviceInformation()
@@ -124,10 +109,11 @@ namespace HSPI_ESPHomeNative.ESPHome
             _homeSeer = homeSeer;
             foreach (var entity in Entities)
             {
-                foreach(var devFeature in entity.ProcessFeatures(device, homeSeer))
+                foreach(var devFeature in entity.ProcessFeatures())
                 {
                     eventCallbacks.Add(devFeature.Key, devFeature.Value);
                 }
+                entity.RequestStatusUpdate();
             }
         }
 
@@ -156,105 +142,89 @@ namespace HSPI_ESPHomeNative.ESPHome
             }
         }
 
-        public void RequestStatusUpdate()
-        {
-            foreach(IEntity entity in Entities)
-            {
-                entity.RequestStatusUpdate();
-            }
-        }
-
-        public void SendMessage<T>(T message) where T : IMessage
-        {
-            outgoingMessages.Enqueue(message);
-            newMessage.Release();
-        }
-
-        private async void Writer()
+        public void SendMessage<T>(T message) where T : ProtoBuf.IExtensible
         {
             NetworkStream netStream = _client.GetStream();
-            while (true)
+            MeasureState<T> t = Serializer.Measure(message);
+            netStream.WriteByte(0);
+            EncodeUInt32(netStream, (uint)t.Length);
+            EncodeUInt32(netStream, (uint)ProtocolTypeMap.GetOutgoingMessageType(message));
+            t.Serialize(netStream);
+        }
+
+        private void Reader()
+        {
+            NetworkStream netstream = _client.GetStream();
+            
+            try
             {
-                if (!outgoingMessages.IsEmpty && outgoingMessages.TryDequeue(out IMessage message))
+                while (_connected)
                 {
-                    uint messageType = 0;
-                    var options = message.Descriptor.GetOptions();
-                    if (options != null && options.HasExtension(EsphomeApiOptionsExtensions.Id))
+
+                    if (netstream.ReadByte() != 0)
+                        throw new Exception("Invalid Indicator");
+
+                    int messageLength = (int)DecodeUInt32(netstream);
+                    IncomingMessageType messageType = (IncomingMessageType)DecodeUInt32(netstream);
+
+                    if (messageLength > 8192)
+                        throw new Exception("Incoming message is too large");
+                    _lastMessage = DateTime.UtcNow;
+
+                    IExtensible message = GetIncomingMessage(netstream, messageType, messageLength);
+                    switch (message)
                     {
-                       messageType = options.GetExtension(EsphomeApiOptionsExtensions.Id);
-                    }
-
-                    int messageSize = message.CalculateSize();
-                    byte[] headerBytes = new byte[11];
-                    headerBytes[0] = 0x00;
-                    int offset = EncodeUInt32(ref headerBytes, 1, (uint)messageSize);
-                    offset += EncodeUInt32(ref headerBytes, offset + 1, messageType);
-
-                    await netStream.WriteAsync(headerBytes, 0, offset + 1);
-                    await netStream.WriteAsync(message.ToByteArray(), 0, messageSize);
+                        case HelloResponse:
+                            break;
+                        case ConnectResponse connectResponse:
+                            _tcsConnected.SetResult(connectResponse);
+                            if (connectResponse.InvalidPassword)
+                            {
+                                _client.Close();
+                                return;
+                            }
+                            SendMessage(new SubscribeStatesRequest());
+                            break;
+                        case PingRequest:
+                            SendMessage(new PingResponse());
+                            break;
+                        case DeviceInfoResponse deviceInfoResponse:
+                            _tcsDeviceInfo.SetResult(deviceInfoResponse);
+                            break;
+                        case ListEntitiesDoneResponse:
+                            _tcsListEntitiesDone.SetResult(null);
+                            break;
+                        case ListEntitiesLightResponse lightEntity:
+                            Entities.Add(new LightEntity(this, lightEntity));
+                            break;
+                        default:
+                            Entities.ForEach(E => E.HandleMessage(message));
+                            break;
+                    };
                 }
-                else
-                    newMessage.Wait(100);
+            }
+
+            catch(IOException ex)
+            {
+                if(ex.InnerException is SocketException e)
+                {
+                    switch(e.SocketErrorCode)
+                    {
+                        case SocketError.Disconnecting:
+                        case SocketError.ConnectionReset:
+                            Disconnect();
+                            break;
+                    }
+                }
             }
         }
-        private async void Reader()
+
+        internal void Disconnect()
         {
-            byte[] readBuffer = new byte[2048];
-
-            NetworkStream netstream = _client.GetStream();
-            while (true)
-            {
-                int readOffset = 0;
-
-                if (netstream.ReadByte() != 0)
-                    throw new Exception("Invalid Indicator");
-
-                int messageSize = (int)DecodeUInt32(netstream);
-                MessageType messageType = (MessageType)DecodeUInt32(netstream);
-
-                if (messageSize > readBuffer.Length)
-                    throw new Exception("Incoming message is too large");
-
-                while (readOffset < messageSize)
-                    readOffset += await _client.GetStream().ReadAsync(readBuffer, readOffset, messageSize - readOffset);
-
-
-                switch (messageType)
-                {
-                    case MessageType.ConnectResponse:
-                        ConnectResponse response = ConnectResponse.Parser.ParseFrom(readBuffer, 0, messageSize);
-                        _tcsConnected.SetResult(response);
-                        if (response.InvalidPassword)
-                        {
-                            _client.Close();
-                            return;
-                        }
-                        SendMessage(new SubscribeStatesRequest());
-                        break;
-                    case MessageType.PingRequest:
-                        SendMessage(new PingResponse());
-                        break;
-                    case MessageType.DeviceInfoResponse:
-                            _tcsDeviceInfo.SetResult(DeviceInfoResponse.Parser.ParseFrom(readBuffer, 0, messageSize));
-                        break;
-                    case MessageType.ListEntitiesDoneResponse:
-                        _tcsListEntitiesDone.SetResult(null);
-                        break;
-                    case MessageType.ListEntitiesLightResponse:
-                        {
-
-                            ListEntitiesLightResponse entity = ListEntitiesLightResponse.Parser.ParseFrom(readBuffer, 0, messageSize);
-                            Entities.Add(new LightEntity(this, entity));
-                        }
-                        break;
-                    case MessageType.LightStateResponse:
-                        {
-                            LightStateResponse lsr = LightStateResponse.Parser.ParseFrom(readBuffer, 0, messageSize);
-                            (Entities.Find(E => E.GetType() == typeof(LightEntity) && E.Key == lsr.Key) as LightEntity).UpdateState(lsr);
-                        }
-                        break;
-                }
-            }
+            
+            _client.Close();
+            pingTimeout.Stop();
+            OnDisconnected?.Invoke(this);
         }
 
         internal void UpdateFeature(int featureId, double value, string valueString)
@@ -262,22 +232,19 @@ namespace HSPI_ESPHomeNative.ESPHome
             OnFeatureUpdate?.Invoke(featureId, value, valueString);
         }
 
-        public static int EncodeUInt32(ref byte[] buffer, int offset, uint value)
+        private void EncodeUInt32(NetworkStream netStream, uint value)
         {
-            int bytes = 0;
             do
             {
                 byte lower7bits = (byte)(value & 0x7f);
                 value >>= 7;
                 if (value > 0)
                     lower7bits |= 128;
-                buffer[offset + bytes] = lower7bits;
-                bytes++;
+                netStream.WriteByte(lower7bits);
             } while (value > 0);
-            return bytes;
         }
 
-        public static uint DecodeUInt32(NetworkStream netStream)
+        private uint DecodeUInt32(NetworkStream netStream)
         {
             bool more = true;
             int shift = 0;

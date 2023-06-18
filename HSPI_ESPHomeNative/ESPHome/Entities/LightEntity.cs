@@ -1,7 +1,7 @@
-﻿using Esphome;
-using HomeSeer.PluginSdk;
+﻿using HomeSeer.PluginSdk;
 using HomeSeer.PluginSdk.Devices;
 using HomeSeer.PluginSdk.Devices.Controls;
+using ProtoBuf;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -10,11 +10,12 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
 {
     internal class LightEntity : EntityBase<ListEntitiesLightResponse>
     {
-        internal LightEntity(ESPHomeDevice device, ListEntitiesLightResponse lightEntity) : base(device, lightEntity, lightEntity.UniqueId, lightEntity.Key)
+        internal LightEntity(ESPHomeDevice device, ListEntitiesLightResponse lightEntity) 
+            : base(device, lightEntity, lightEntity.UniqueId, lightEntity.Key)
         {
         }
 
-        public override Dictionary<int, Action<ControlEvent>> ProcessFeatures(HsDevice device, IHsController homeSeer)
+        public override Dictionary<int, Action<ControlEvent>> ProcessFeatures()
         {
 
             var controlsFactory = FeatureFactory.CreateGenericBinaryControl(Program._plugin.Id, $"{EntityData.Name} State", "On", "Off", 100, 0)
@@ -42,17 +43,18 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
             {
                 if (controlEvent.ControlValue == 0)
                     SetState(false);
-                else if (controlEvent.ControlValue == 100)
-                    SetState(true);
                 else if (controlEvent.ControlValue < 100)
                     SetBrightness((float)((controlEvent.ControlValue - 1.0) / 98.0));
+                else if (controlEvent.ControlValue == 100)
+                    SetState(true);
             });
         
 
-            if (EntityData.SupportedColorModes.Contains(ColorMode.Rgb))
+            if (EntityData.SupportedColorModes.Contains(ColorMode.ColorModeRgb))
             {
+                
                 var colorFeature = Device.GetOrCreateFeature("color", FeatureFactory.CreateFeature(Program._plugin.Id)
-                    .WithName($"{EntityData.Name} Color").OnDevice(device.Ref)
+                    .WithName($"{EntityData.Name} Color")
                     .AddColorPicker(0, controlUse: EControlUse.ColorControl)
                     .AddGraphicForValue("images/HomeSeer/status/custom-color.png", 0));
 
@@ -127,6 +129,14 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
             Device.SendMessage(lightCommand);
         }
 
+        public override void HandleMessage(IExtensible message)
+        {
+            if(message is LightStateResponse state && state.Key == Key)
+            {
+                UpdateState(state);
+            }
+        }
+
         public void SetState(bool state)
         {
             LightCommandRequest lightCommand = new LightCommandRequest()
@@ -161,7 +171,7 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
                 Key = this.Key,
                 HasState = true,
                 State = true,
-                ColorMode = ColorMode.Rgb,
+                ColorMode = ColorMode.ColorModeRgb,
                 HasColorMode = true,
                 Effect = "None",
                 HasEffect = true,
@@ -180,7 +190,7 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
                 Key = this.Key,
                 HasState = true,
                 State = true,
-                ColorMode = ColorMode.Rgb,
+                ColorMode = ColorMode.ColorModeRgb,
                 Effect = effect,
                 HasEffect= true
             };

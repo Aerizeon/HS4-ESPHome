@@ -33,6 +33,7 @@ namespace HSPI_ESPHomeNative
             deviceManager.OnDeviceFound += OnDeviceFound;
             await deviceManager.FindDevices();
             Status = PluginStatus.Ok();
+            deviceManager.ListenForAnnoucnements(new System.Threading.CancellationToken());
         }
 
         private async void OnDeviceFound(ESPHomeDevice device)
@@ -52,7 +53,6 @@ namespace HSPI_ESPHomeNative
             }
 
             device.PrepareFeatures(hsDevice, HomeSeerSystem);
-            device.RequestStatusUpdate();
         }
 
         private void OnFeatureUpdate(int refId, double value, string valueString)

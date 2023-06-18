@@ -31,7 +31,7 @@ namespace HSPI_ESPHomeNative.ESPHome
             }
         }
 
-        public async Task ListenForAnnoucnements(CancellationToken cancellationToken)
+        public async void ListenForAnnoucnements(CancellationToken cancellationToken)
         {
             await ZeroconfResolver.ListenForAnnouncementsAsync((announcement) => { 
                 foreach(KeyValuePair<string, IService> service in announcement.Host.Services)
@@ -55,12 +55,18 @@ namespace HSPI_ESPHomeNative.ESPHome
 
         private void DeviceDiscovered(IZeroconfHost host, IService service)
         {
-            if(!_devices.ContainsKey(host.Id))
+            if(!_devices.ContainsKey(service.Properties[0]["mac"]))
             {
                 var device = new ESPHomeDevice(host.DisplayName, host.IPAddress, service.Port, service.Properties[0]["mac"]);
-                _devices[host.Id] = device;
+                device.OnDisconnected += Device_OnDisconnected;
+                _devices[service.Properties[0]["mac"]] = device;
                 OnDeviceFound?.Invoke(device);
             }
+        }
+
+        private void Device_OnDisconnected(ESPHomeDevice sender)
+        {
+            _devices.TryRemove(sender.Id, out _);
         }
     }
 }

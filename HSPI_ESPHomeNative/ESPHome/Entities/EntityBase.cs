@@ -1,8 +1,10 @@
 ﻿using HomeSeer.PluginSdk;
 using HomeSeer.PluginSdk.Devices;
 using HomeSeer.PluginSdk.Devices.Controls;
+using ProtoBuf;
 using System;
 using System.Collections.Generic;
+using System.Reactive.Concurrency;
 
 namespace HSPI_ESPHomeNative.ESPHome.Entities
 {
@@ -27,7 +29,8 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
         public string Name { get; private set; }
         public uint Key { get; private set; }
 
-        public virtual Dictionary<int, Action<ControlEvent>> ProcessFeatures(HsDevice device, IHsController homeSeer) { throw new NotImplementedException(); }
+        public virtual Dictionary<int, Action<ControlEvent>> ProcessFeatures() { throw new NotImplementedException(); }
         public virtual void RequestStatusUpdate() {  throw new NotImplementedException(); }
+        public virtual void HandleMessage(IExtensible message) {  throw new NotImplementedException(); }
     }
 }
