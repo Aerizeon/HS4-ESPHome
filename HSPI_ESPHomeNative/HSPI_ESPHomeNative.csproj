@@ -91,9 +91,12 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="ESPHome\Entities\ButtonEntity.cs" />
     <Compile Include="ESPHome\Entities\EntityBase.cs" />
+    <Compile Include="ESPHome\Entities\FanEntity.cs" />
     <Compile Include="ESPHome\Entities\IEntity.cs" />
     <Compile Include="ESPHome\Entities\LightEntity.cs" />
+    <Compile Include="ESPHome\Entities\SwitchEntity.cs" />
     <Compile Include="ESPHome\ESPHomeDevice.cs" />
     <Compile Include="ESPHome\DeviceManager.cs" />
     <Compile Include="ESPHome\ESPProto.cs" />

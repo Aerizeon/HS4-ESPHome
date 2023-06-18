@@ -65,8 +65,13 @@ namespace HSPI_ESPHomeNative.ESPHome
                 IncomingMessageType.PingResponse => Serializer.Deserialize<PingResponse>(stream, length:messageLength),
                 IncomingMessageType.DeviceInfoResponse => Serializer.Deserialize<DeviceInfoResponse>(stream, length:messageLength),
                 IncomingMessageType.ListEntitiesDoneResponse => Serializer.Deserialize<ListEntitiesDoneResponse>(stream, length:messageLength),
+                IncomingMessageType.ListEntitiesFanResponse => Serializer.Deserialize<ListEntitiesFanResponse>(stream, length: messageLength),
+                IncomingMessageType.FanStateResponse => Serializer.Deserialize<FanStateResponse>(stream, length: messageLength),
+                IncomingMessageType.ListEntitiesSwitchResponse => Serializer.Deserialize<ListEntitiesSwitchResponse>(stream, length:messageLength),
+                IncomingMessageType.SwitchStateResponse => Serializer.Deserialize<SwitchStateResponse>(stream, length:messageLength),
                 IncomingMessageType.ListEntitiesLightResponse => Serializer.Deserialize<ListEntitiesLightResponse>(stream, length:messageLength),
                 IncomingMessageType.LightStateResponse => Serializer.Deserialize<LightStateResponse>(stream, length:messageLength),
+                IncomingMessageType.ListEntitiesButtonResponse => Serializer.Deserialize<ListEntitiesButtonResponse>(stream, length: messageLength),
                 _ => throw new NotImplementedException()
 
             };

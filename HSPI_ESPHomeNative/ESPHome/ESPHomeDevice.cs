@@ -45,10 +45,10 @@ namespace HSPI_ESPHomeNative.ESPHome
 
         public delegate void FeatureUpdateHandler(int refId, double value, string valueString);
         public event FeatureUpdateHandler OnFeatureUpdate;
-       
 
-      
 
+
+        private int devFeatureCount = 0;
         private HsDevice _device;
         private IHsController _homeSeer;
         private bool _connected = false;
@@ -117,8 +117,10 @@ namespace HSPI_ESPHomeNative.ESPHome
             }
         }
 
+
         public HsFeature GetOrCreateFeature(string address, FeatureFactory featureFactory)
         {
+            
             if (featureFactory == null)
                 throw new ArgumentNullException(nameof(featureFactory));
 
@@ -129,6 +131,7 @@ namespace HSPI_ESPHomeNative.ESPHome
                 searchFeature = _homeSeer.GetFeatureByRef(
                     _homeSeer.CreateFeatureForDevice(
                         featureFactory.WithAddress(address)
+                        .WithDisplayType(devFeatureCount++ == 0 ? EFeatureDisplayType.Important : EFeatureDisplayType.Normal)
                         .PrepareForHsDevice(_device.Ref)));
             }
             return searchFeature;
@@ -194,8 +197,17 @@ namespace HSPI_ESPHomeNative.ESPHome
                         case ListEntitiesDoneResponse:
                             _tcsListEntitiesDone.SetResult(null);
                             break;
+                        case ListEntitiesFanResponse fanEntity:
+                            Entities.Add(new FanEntity(this, fanEntity));
+                            break;
+                        case ListEntitiesSwitchResponse switchEntity:
+                            Entities.Add(new SwitchEntity(this, switchEntity));
+                            break;
                         case ListEntitiesLightResponse lightEntity:
                             Entities.Add(new LightEntity(this, lightEntity));
+                            break;
+                        case ListEntitiesButtonResponse buttonEntity:
+                            Entities.Add(new ButtonEntity(this, buttonEntity));
                             break;
                         default:
                             Entities.ForEach(E => E.HandleMessage(message));

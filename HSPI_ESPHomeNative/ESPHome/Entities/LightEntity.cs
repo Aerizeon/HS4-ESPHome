@@ -19,7 +19,6 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
         {
 
             var controlsFactory = FeatureFactory.CreateGenericBinaryControl(Program._plugin.Id, $"{EntityData.Name} State", "On", "Off", 100, 0)
-            .WithDisplayType(EFeatureDisplayType.Important)
                 .AddSlider(new ValueRange(1, 99), controlUse: EControlUse.Dim)
                 .AddGraphicForValue("images/HomeSeer/status/unknown.png", -1.0, "Offline")
                 .AddGraphicForRange("images/HomeSeer/status/dim-00.gif", 01.00f, 10f)
@@ -33,7 +32,7 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
                 .AddGraphicForRange("images/HomeSeer/status/dim-80.gif", 80.01f, 90f)
                 .AddGraphicForRange("images/HomeSeer/status/dim-90.gif", 90.01f, 99f);
 
-            var controlsFeature = Device.GetOrCreateFeature("controls", controlsFactory);
+            var controlsFeature = Device.GetOrCreateFeature($"{EntityData.UniqueId}-controls", controlsFactory);
                
                 
 
@@ -53,7 +52,7 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
             if (EntityData.SupportedColorModes.Contains(ColorMode.ColorModeRgb))
             {
                 
-                var colorFeature = Device.GetOrCreateFeature("color", FeatureFactory.CreateFeature(Program._plugin.Id)
+                var colorFeature = Device.GetOrCreateFeature($"{EntityData.UniqueId}-color", FeatureFactory.CreateFeature(Program._plugin.Id)
                     .WithName($"{EntityData.Name} Color")
                     .AddColorPicker(0, controlUse: EControlUse.ColorControl)
                     .AddGraphicForValue("images/HomeSeer/status/custom-color.png", 0));
@@ -78,7 +77,7 @@ namespace HSPI_ESPHomeNative.ESPHome.Entities
                 foreach (var effect in EntityData.Effects)
                     effects.Add(effect, effects.Count);
 
-                var effectFeature = Device.GetOrCreateFeature("effect", FeatureFactory.CreateFeature(Program._plugin.Id)
+                var effectFeature = Device.GetOrCreateFeature($"{EntityData.UniqueId}-effect", FeatureFactory.CreateFeature(Program._plugin.Id)
                     .WithName($"{EntityData.Name} Effect").
                     AddTextDropDown(effects, controlUse: EControlUse.OnAlternate));
                 FeatureIds.Add("effect", effectFeature.Ref);
