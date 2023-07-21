@@ -27,4 +27,5 @@ Please note that this isn't a comprehensive library at the moment - it is mainly
 4. Copy the other DLL files to `/bin/ESPHomeNative`
 5. Restart Homeseer
 
-Once installed and enabled, the plugin will automatically use mDNS to discover EPSHome devices on the same network. 
+Once installed and enabled, the plugin will automatically use mDNS to discover EPSHome devices on the same network.
+To add them to your home, navigate to Plugins > ESPHome Native > Add Device. From there, you should be able to walk through the process to include the device.

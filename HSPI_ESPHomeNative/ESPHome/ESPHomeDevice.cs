@@ -26,22 +26,30 @@ using System.Reflection;
 using System.IO;
 using static HSPI_ESPHomeNative.ESPHome.ProtocolTypeMap;
 using System.Runtime.InteropServices.ComTypes;
+using Noise;
 
 namespace HSPI_ESPHomeNative.ESPHome
 {
+    public enum DisconnectReason
+    {
+        Unknown = 0,
+        DisconnectRequested = 1,
+        ConnectionReset = 2,
+        Timeout = 3
+    }
+
     internal class ESPHomeDevice
     {
         public string Name { get; private set; }
+        public DeviceInfo Info { get; private set; }
+        public bool UseEncryption { get; private set; }
         public string FriendlyName { get; private set; }
         public List<IEntity> Entities{ get; private set; } = new List<IEntity>();
-        public string Id { get; private set; }
-        public IPAddress Address { get; private set; }
-        public int Port { get; private set; }
 
-        public delegate void DisconnectedHandler(ESPHomeDevice sender);
+        public delegate void DisconnectedHandler(ESPHomeDevice sender, DisconnectReason reason);
         public event DisconnectedHandler OnDisconnected;
 
-        Dictionary<int, Action<ControlEvent>> eventCallbacks = new Dictionary<int, Action<ControlEvent>>();
+        Dictionary<int, Action<ControlEvent>> eventCallbacks = new();
 
         public delegate void FeatureUpdateHandler(int refId, double value, string valueString);
         public event FeatureUpdateHandler OnFeatureUpdate;
@@ -58,13 +66,17 @@ namespace HSPI_ESPHomeNative.ESPHome
         private TaskCompletionSource<DeviceInfoResponse> _tcsDeviceInfo = new TaskCompletionSource<DeviceInfoResponse>();
         private TaskCompletionSource<object> _tcsListEntitiesDone = new TaskCompletionSource<object>();
         private System.Timers.Timer pingTimeout = new System.Timers.Timer();
+        private byte[] _devicePSK = null;
+        private string devicePassword;
 
-        public ESPHomeDevice(string name, string address, int port, string macAddress)
+        public ESPHomeDevice(DeviceInfo deviceInfo, string devicePSK)
         {
-            Name = name;
-            Id = macAddress;
-            Address = IPAddress.Parse(address);
-            Port = port;
+            //devicePSK = "9qvHujCL96ldR10I59yIDN9IViQzSDb45Kc3QAHkm9E=";
+            Info = deviceInfo;
+            Name = deviceInfo.Name;
+            UseEncryption = !String.IsNullOrEmpty(devicePSK);
+            if (UseEncryption)
+                _devicePSK = Convert.FromBase64String(devicePSK);
             _client = new TcpClient();
             pingTimeout.Interval = 10000;
             pingTimeout.AutoReset = true;
@@ -74,21 +86,77 @@ namespace HSPI_ESPHomeNative.ESPHome
         private void PingTimeout_Elapsed(object sender, ElapsedEventArgs e)
         {
             if (DateTime.UtcNow - _lastMessage > TimeSpan.FromSeconds(90))
-                Disconnect();
+                Disconnect(DisconnectReason.Timeout);
         }
 
-        public async Task<ConnectResponse> Connect(string password = "")
+        byte[] writeBuf = new byte[4096];
+        byte[] payloadBuf = new byte[4096];
+        public async Task<ConnectResponse> Connect(string password = "", bool isReconnect = false)
         {
-            await _client.ConnectAsync(Address, Port);
-            _connected = true;
+            devicePassword = password;
+            int retryCounter = 0;
+            while (!_connected)
+            {
+                try
+                {
+                    _client.NoDelay = true;
+                    await _client.ConnectAsync(Info.Address, Info.Port);
+                    if(UseEncryption)
+                    {
+                       /* var protocol = Protocol.Parse("Noise_NNpsk0_25519_ChaChaPoly_SHA256".AsSpan());
+                        byte[] prologue = Encoding.ASCII.GetBytes("NoiseAPIInit\0");
+                        var initiator = protocol.Create(true, prologue, psks: new List<byte[]> { _devicePSK });
+
+
+                        writeBuf[0] = 1;
+                        writeBuf[1] = 0;
+                        writeBuf[2] = 0;
+                        _client.GetStream().WriteAsync(writeBuf, 0, 3);
+
+
+                        // Read the hello response
+                        int read = await _client.GetStream().ReadAsync(writeBuf, 0, 4096);
+                        var indicator = writeBuf[0];
+                        var msgLen = ((uint)writeBuf[1] << 8 | (uint)writeBuf[2]);
+                        var protochoice = writeBuf[3]; // We only have one proto choice, so this should always be 1
+                        var dat = Encoding.UTF8.GetString(writeBuf, 4, (int)msgLen-1); // we just get the name back here.
+
+                        // now we can actually send data.
+                        (var written, _, var transport) = initiator.WriteMessage(null, writeBuf.AsSpan(4));
+                        written += 1;
+                        writeBuf[0] = 1;
+                        writeBuf[1] = (byte)((written >> 8) & 0xFF);
+                        writeBuf[2] = (byte)((written >> 0) & 0xFF);
+                        writeBuf[3] = 0x00;
+                        await _client.GetStream().WriteAsync(writeBuf, 0, written + 4);
+
+                        read = await _client.GetStream().ReadAsync(writeBuf, 0, 4096);
+                        indicator = writeBuf[0];
+                        msgLen = ((uint)writeBuf[1] << 8 | (uint)writeBuf[2]);
+                        dat = Encoding.UTF8.GetString(writeBuf, 4, (int)msgLen - 1);
+                        (int bytesRead, _, _) = initiator.ReadMessage(writeBuf.AsSpan(3, (int)msgLen), payloadBuf.AsSpan());*/
+                    }
+
+                    _connected = true;
+                }
+                catch (SocketException ex)
+                {
+                    // If we were previously connected, we should retry indefinitely.
+                    if (retryCounter++ > 5 && !isReconnect)
+                        throw ex;
+                    retryCounter++;
+                    await Task.Delay(2000);
+                }
+            }
             _ = Task.Run(Reader);
             // We can skip the hello portion of the exchange,
             // since we're not using the noise encryption yet.
 
-            ConnectRequest request = new ConnectRequest
+            ConnectRequest request = new()
             {
-                Password = password
+                Password = devicePassword
             };
+
             SendMessage(request);
             pingTimeout.Start();
             return await _tcsConnected.Task;
@@ -117,13 +185,11 @@ namespace HSPI_ESPHomeNative.ESPHome
             }
         }
 
-
         public HsFeature GetOrCreateFeature(string address, FeatureFactory featureFactory)
         {
             
             if (featureFactory == null)
                 throw new ArgumentNullException(nameof(featureFactory));
-
             var searchFeature = _device.Features.SingleOrDefault(f => f.Address == address);
 
             if (searchFeature is null)
@@ -150,8 +216,8 @@ namespace HSPI_ESPHomeNative.ESPHome
             NetworkStream netStream = _client.GetStream();
             MeasureState<T> t = Serializer.Measure(message);
             netStream.WriteByte(0);
-            EncodeUInt32(netStream, (uint)t.Length);
-            EncodeUInt32(netStream, (uint)ProtocolTypeMap.GetOutgoingMessageType(message));
+            EncodeVarUInt32(netStream, (uint)t.Length);
+            EncodeVarUInt32(netStream, (uint)ProtocolTypeMap.GetOutgoingMessageType(message));
             t.Serialize(netStream);
         }
 
@@ -165,10 +231,10 @@ namespace HSPI_ESPHomeNative.ESPHome
                 {
 
                     if (netstream.ReadByte() != 0)
-                        throw new Exception("Invalid Indicator");
+                        throw new Exception("Device is sending encrypted data.");
 
-                    int messageLength = (int)DecodeUInt32(netstream);
-                    IncomingMessageType messageType = (IncomingMessageType)DecodeUInt32(netstream);
+                    int messageLength = (int)DecodeVarUInt32(netstream);
+                    IncomingMessageType messageType = (IncomingMessageType)DecodeVarUInt32(netstream);
 
                     if (messageLength > 8192)
                         throw new Exception("Incoming message is too large");
@@ -177,7 +243,8 @@ namespace HSPI_ESPHomeNative.ESPHome
                     IExtensible message = GetIncomingMessage(netstream, messageType, messageLength);
                     switch (message)
                     {
-                        case HelloResponse:
+                        case HelloResponse helloResponse:
+                            Console.WriteLine(helloResponse);
                             break;
                         case ConnectResponse connectResponse:
                             _tcsConnected.SetResult(connectResponse);
@@ -187,6 +254,9 @@ namespace HSPI_ESPHomeNative.ESPHome
                                 return;
                             }
                             SendMessage(new SubscribeStatesRequest());
+                            break;
+                        case DisconnectRequest:
+                            Disconnect(DisconnectReason.DisconnectRequested);
                             break;
                         case PingRequest:
                             SendMessage(new PingResponse());
@@ -223,20 +293,22 @@ namespace HSPI_ESPHomeNative.ESPHome
                     switch(e.SocketErrorCode)
                     {
                         case SocketError.Disconnecting:
+                            Disconnect(DisconnectReason.DisconnectRequested);
+                            break;
                         case SocketError.ConnectionReset:
-                            Disconnect();
+                            Disconnect(DisconnectReason.ConnectionReset);
                             break;
                     }
                 }
             }
         }
 
-        internal void Disconnect()
+        internal void Disconnect(DisconnectReason reason = DisconnectReason.Unknown)
         {
-            
+            _connected = false;
             _client.Close();
             pingTimeout.Stop();
-            OnDisconnected?.Invoke(this);
+            OnDisconnected?.Invoke(this, reason);
         }
 
         internal void UpdateFeature(int featureId, double value, string valueString)
@@ -244,7 +316,13 @@ namespace HSPI_ESPHomeNative.ESPHome
             OnFeatureUpdate?.Invoke(featureId, value, valueString);
         }
 
-        private void EncodeUInt32(NetworkStream netStream, uint value)
+        private void EncodeUInt16(NetworkStream netStream, ushort value)
+        {
+            netStream.WriteByte((byte)((value >> 8) & 0xFF));
+            netStream.WriteByte((byte)((value >> 0) & 0xFF));
+        }
+
+        private void EncodeVarUInt32(NetworkStream netStream, uint value)
         {
             do
             {
@@ -256,7 +334,7 @@ namespace HSPI_ESPHomeNative.ESPHome
             } while (value > 0);
         }
 
-        private uint DecodeUInt32(NetworkStream netStream)
+        private uint DecodeVarUInt32(NetworkStream netStream)
         {
             bool more = true;
             int shift = 0;

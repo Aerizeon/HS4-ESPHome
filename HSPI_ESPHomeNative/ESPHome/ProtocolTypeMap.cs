@@ -121,6 +121,7 @@ namespace HSPI_ESPHomeNative.ESPHome
         {
             HelloResponse = 2,
             ConnectResponse = 4,
+            DisconnectRequest = 5,
             DisconnectResponse = 6,
             PingRequest = 7,
             PingResponse = 8,
