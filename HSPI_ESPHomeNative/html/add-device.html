@@ -278,7 +278,7 @@
                 async: "true",
                 url: '/ESPHomeNative/add-device.html',
                 cache: false,
-                data: JSON.stringify(postObject),
+                data: JSON.stringify(devObject),
                 success: function (response) {
                     if (response === "error") {
                         onPostError("Error");

@@ -1,28 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using System.Net.Sockets;
-using Google.Protobuf;
-using System.Net.Configuration;
 using HomeSeer.PluginSdk.Devices;
 using HSPI_ESPHomeNative.ESPHome.Entities;
 using HomeSeer.PluginSdk;
 using HomeSeer.PluginSdk.Devices.Controls;
-using System.Net;
-using System.Collections.Concurrent;
-using System.Threading;
-using System.Security.Cryptography;
-using HomeSeer.PluginSdk.Logging;
 using System.Timers;
 using ProtoBuf;
-using Google.Protobuf.Reflection;
-using ProtoBuf.Reflection;
-using Newtonsoft.Json.Linq;
-using ProtoBuf.Meta;
-using System.CodeDom;
-using System.Reflection;
 using System.IO;
 using static HSPI_ESPHomeNative.ESPHome.ProtocolTypeMap;
 using System.Runtime.InteropServices.ComTypes;
@@ -92,7 +78,7 @@ namespace HSPI_ESPHomeNative.ESPHome
         byte[] writeBuf = new byte[4096];
         byte[] payloadBuf = new byte[4096];
         public async Task<ConnectResponse> Connect(string password = "", bool isReconnect = false)
-        {
+        { 
             devicePassword = password;
             int retryCounter = 0;
             while (!_connected)
@@ -213,6 +199,10 @@ namespace HSPI_ESPHomeNative.ESPHome
 
         public void SendMessage<T>(T message) where T : ProtoBuf.IExtensible
         {
+            if(!_client.Connected)
+            {
+                Connect().GetAwaiter().GetResult(); ;
+            }
             NetworkStream netStream = _client.GetStream();
             MeasureState<T> t = Serializer.Measure(message);
             netStream.WriteByte(0);
